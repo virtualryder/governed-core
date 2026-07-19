@@ -1,0 +1,40 @@
+{
+  "Comment": "Human sign-off gate (separation of duties). Pauses at a human approval before the privileged finalize.",
+  "StartAt": "AwaitApproval",
+  "States": {
+    "AwaitApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "{{PREFIX}}-signoff-register",
+        "Payload": {
+          "icsr_id.$": "$.icsr_id",
+          "requester.$": "$.requester",
+          "taskToken.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSeconds": 86400,
+      "ResultPath": "$.approval",
+      "Next": "Finalize"
+    },
+    "Finalize": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "{{PREFIX}}-finalize",
+        "Payload": {
+          "icsr_id.$": "$.icsr_id",
+          "requester.$": "$.requester",
+          "approver.$": "$.approval.approver"
+        }
+      },
+      "ResultSelector": {
+        "committed.$": "$.Payload.committed",
+        "submission_id.$": "$.Payload.submission_id",
+        "approver.$": "$.Payload.approver"
+      },
+      "ResultPath": "$.result",
+      "End": true
+    }
+  }
+}

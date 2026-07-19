@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+.bedrock_agentcore.yaml
+.bedrock_agentcore/
+ssm-pol.json

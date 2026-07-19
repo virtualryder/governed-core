@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "governed-core"
+# Single source of truth for the version is governed_core/CORE_VERSION; keep this in sync when re-locking.
+version = "1.1.0"
+description = "Versioned governance operating layer for regulated AgentCore agents: Cedar controls, canonical WORM evidence, sign-off gate, provenance/identity verifiers, deploy engine, runtime."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "virtualryder" }]
+# Runtime deps are intentionally minimal; boto3 is provided by the Lambda/AgentCore runtime and pinned
+# in governed_core/runtime/requirements.txt for the deployed image.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pyyaml==6.0.3", "boto3==1.43.51", "pytest==9.1.1", "ruff==0.15.22"]
+
+[project.scripts]
+governed-core-verify = "governed_core.verify_core:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Bundle the non-.py core assets (shell engine, templates, Dockerfile, Cedar/ASL, lock, version) into the
+# installed package so the deploy engine and integrity check work from an installed copy.
+[tool.setuptools.package-data]
+governed_core = [
+    "CORE_VERSION",
+    "core.lock",
+    "engine/*.sh",
+    "engine/*.tmpl",
+    "engine/*.json",
+    "connector/*.sh",
+    "runtime/Dockerfile",
+    "runtime/.dockerignore",
+    "runtime/requirements.txt",
+    "runtime/*.sh",
+    "runtime/*.json",
+]

@@ -1,0 +1,8 @@
+# Pinned for supply-chain integrity (P0-8). Regenerate on upgrade and, for a production build, produce a
+# fully hashed lock (e.g. `pip-compile --generate-hashes`). Versions pinned at 2026-07 authoring time.
+bedrock-agentcore==1.18.1
+strands-agents==1.48.0
+strands-agents-tools==0.8.4
+mcp==1.28.1
+boto3==1.43.51
+aws-opentelemetry-distro==0.18.0
