@@ -5,6 +5,8 @@ import urllib.parse
 import urllib.error
 import boto3
 
+from resilience import CircuitBreaker, CircuitOpen, resilient_call
+
 # verify_source — a reusable GOVERNED connector tool that verifies a case against a REAL, OAuth2-protected
 # external system of record (mock). It retires the "labeled stub" caveat: it is a real authenticated call.
 # The outbound OAuth2 token is minted by **AgentCore Identity** — this tool holds NO client secret. Flow
@@ -20,6 +22,10 @@ PROVIDER_NAME = os.environ.get("PROVIDER_NAME", "")
 WI_NAME = os.environ.get("WI_NAME", "")
 SCOPE = os.environ.get("SCOPE", "")
 REGION = os.environ.get("AWS_REGION", "us-east-1")
+
+# Circuit breaker for the outbound system-of-record call (Workstream B). Module-level so the state
+# persists across warm Lambda invocations: a dead SoR trips the breaker and is short-circuited fast.
+_SOR_BREAKER = CircuitBreaker(failure_threshold=5, reset_timeout=30.0)
 
 
 def _coerce(e):
@@ -61,12 +67,25 @@ def handler(event, context):
     url = SOR_URL.rstrip("/") + "?" + urllib.parse.urlencode({"case_id": case_id})
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token,
                                                "User-Agent": "governed-connector/1.0"})
-    try:
+    def _fetch():
         with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            return json.loads(resp.read().decode("utf-8"))
+
+    try:
+        # Circuit-broken + retried external call (Workstream B): a flaky/slow SoR degrades to a fast,
+        # controlled failure so the tool falls soft to verified:false rather than hanging the Lambda.
+        # HTTP status errors (401/403/5xx) are deterministic and NOT retried (give_up on HTTPError).
+        data = resilient_call(
+            _fetch, breaker=_SOR_BREAKER, attempts=3, base_delay=0.2,
+            exceptions=(urllib.error.URLError, TimeoutError),
+            give_up=lambda ex: isinstance(ex, urllib.error.HTTPError),
+        )
     except urllib.error.HTTPError as ex:
         return {"verified": False, "error": "system-of-record returned HTTP %s" % ex.code,
                 "sor_auth_enforced": ex.code in (401, 403)}
+    except CircuitOpen:
+        return {"verified": False, "error": "system-of-record temporarily unavailable (circuit open)",
+                "circuit": "open"}
     except (urllib.error.URLError, TimeoutError, ValueError) as ex:
         return {"verified": False, "error": "system-of-record call failed: %s" % type(ex).__name__}
 
