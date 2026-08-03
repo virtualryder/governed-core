@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: integrity · tests · wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # This package carried the live AWS account id in two deploy-time artifacts before it was
+      # split out. Both are gitignored now; this makes sure they cannot come back.
+      - name: No real AWS account id in committed content
+        run: |
+          set -eu
+          if git grep -I -n -E "arn:aws[a-z-]*:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}|[0-9]{12}\.dkr\.ecr\." \
+             -- . | grep -vE "111122223333|123456789012"; then
+            echo "::error::a real AWS account id is present in committed content"
+            exit 1
+          fi
+          echo "account-id scan: clean"
+
+      - name: Core integrity (no drift from the pinned version)
+        run: python src/governed_core/verify_core.py
+
+      - name: Install + test
+        run: |
+          python -m pip install --quiet "pytest==9.1.1" "ruff==0.15.22" build
+          python -m pytest tests -q
+
+      - name: Lint (bug-class checks)
+        run: ruff check --select E9,F63,F7,F82 src
+
+      # Build on every run, not just on tags: a wheel that only builds at release time is a wheel
+      # that breaks at release time.
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Record the artifact hash
+        run: |
+          set -eu
+          cd dist
+          sha256sum *.whl | tee RELEASE-HASHES.txt
+          echo "Consumers pin this hash with pip --require-hashes; if it changes, installs fail loudly."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*
+
+      # On a version tag, publish the wheel + its hash so consumers can pin them.
+      - name: Attach wheel to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/*.whl dist/RELEASE-HASHES.txt --clobber
