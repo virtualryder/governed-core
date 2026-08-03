@@ -5,10 +5,10 @@
 # 'identical core' while the trees differed is how the exactly-once finalization gap hid for weeks.
 # The 'version' below means: derived from governed-core <version>. CROSS-repo parity is a separate
 # question answered by tools/check_core_parity.py. CI runs both and fails on either.
-version: 1.3.1
+version: 1.4.0
 files: 43
-tree_sha256: a752fa3aeef4e44805a89f2cebc52f4ba0061c2e0c91c3c954361d64e893481c
-10e2e117b01523891ca271a615ae36e9d5e52348fd7d642f66727602c1b8dcbe  governed_core/CORE_VERSION
+tree_sha256: ffff11f2c259cb0977e32ea6802168479d89b21b53559c7abea64f101e2f374c
+78b591400c56b7b67b8cb3b2b8a8e65e9093897f02ce0878e6b5405c68620fa7  governed_core/CORE_VERSION
 4d1a081c2a1382ed1f2f43a3d1163c6c56a432f7966a78f6f1887d80dee0755d  governed_core/__init__.py
 435c5db12aad1ab6d68afaef23e454d872a815496f3bbc08b3b4d16c6c22bacf  governed_core/connector/__init__.py
 2490c78e8067798930870fcb6be5b99fb6316602f0e6958662970c6823cd4c2d  governed_core/connector/deploy_connector.sh
@@ -26,7 +26,7 @@ a2ceacd0587ea428f4e16e69ee6f2dce780662d1945da79e0ce7eb324439d8b3  governed_core/
 75a8cedac6b69e3ae8e669d89954051e7bce751ab82ec08c45c7c5da919ec792  governed_core/controls/provenance.py
 5465d29107a66a1d0b0721f91720690b5f4c416ce8ae2fe3a9b87db4849dba4a  governed_core/controls/request_signoff.py
 e90103568124d021f1b90e738e1379bab56de291b4cf197d459f261195c0dcec  governed_core/controls/resilience.py
-048ebb0e7c9173392a8559bc72489d5974ca43c118fe3b1f1f25cd689dc651de  governed_core/controls/signoff_register.py
+09b1dcb75dc4135e692b0066b5812fcb2a88cd666882262344c447f3e1c600f5  governed_core/controls/signoff_register.py
 80a6e85c1eac7394102c6705526369f564e5759bc2bf4b722b2fac593679cd06  governed_core/controls/verify_chain.py
 eaf1343dbc2cf93e8ef64fb655e948dce77e247707c93aea4dfb063a61610bf7  governed_core/controls/write_audit.py
 5ad9d89e330cf27c2730dc3b92651ea126865149c3903f360ff48873aa36f3e5  governed_core/engine/demo.sh

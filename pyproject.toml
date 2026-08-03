@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "governed-core"
 # Single source of truth for the version is governed_core/CORE_VERSION; keep this in sync when re-locking.
 # tests/test_version_sync.py fails the build if these two disagree - they silently diverged once.
-version = "1.3.1"
+version = "1.4.0"
 description = "Versioned governance operating layer for regulated AgentCore agents: Cedar controls, canonical WORM evidence, sign-off gate, provenance/identity verifiers, deploy engine, runtime."
 readme = "README.md"
 requires-python = ">=3.12"
