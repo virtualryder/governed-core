@@ -72,11 +72,14 @@ sibling," which was never true and cannot be, because the domain-shaped modules 
 python -m pytest tests -q
 python src/governed_core/verify_core.py          # must exit 0
 python src/governed_core/regen_core_lock.py --bump minor   # if the core changed
-SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --wheel   # reproducible: same bytes as CI
+SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --wheel
 ```
 
 Then tag `v<version>`, create the GitHub Release, and let CI attach the wheel and `RELEASE-HASHES.txt`
-(the tag run has `contents: write`); bump the pin in each consumer to the hash on the release. `verify_core.py`, the version-sync test, and the wheel build all run in CI on every push.
+(the tag run has `contents: write`); bump the pin in each consumer to the hash **on the release**.
+A local build is NOT byte-identical to CI's across platforms even with `SOURCE_DATE_EPOCH` (checked
+2026-09-02: Windows vs ubuntu builds of the same commit differ — zip entry attributes), so the asset
+CI attaches is the one consumers pin; a hand-uploaded asset must be the one the pin was taken from. `verify_core.py`, the version-sync test, and the wheel build all run in CI on every push.
 
 ## License
 
