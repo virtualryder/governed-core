@@ -13,6 +13,7 @@ PENDING_TABLE = os.environ.get("PENDING_TABLE", "governed-pending-approvals")
 def handler(event, context):
     region = os.environ.get("AWS_REGION", "us-east-1")
     e = evidence._coerce(event)
+    evidence.bind_tenant(e)   # core 1.6.0: signed tenant pair carried in the execution input
     case_id = e.get("case_id") or e.get("icsr_id")
     requester = e.get("requester")
     token = e.get("taskToken")
@@ -32,7 +33,8 @@ def handler(event, context):
     if e.get("content_hash"):
         item["content_hash"] = e["content_hash"]
     try:
-        boto3.resource("dynamodb", region_name=region).Table(PENDING_TABLE).put_item(
+        boto3.resource("dynamodb", region_name=region).Table(
+            evidence.route_table(PENDING_TABLE, "pending-approvals")).put_item(
             Item=item,
             ConditionExpression="attribute_not_exists(case_id) OR #s <> :pending",
             ExpressionAttributeNames={"#s": "status"},

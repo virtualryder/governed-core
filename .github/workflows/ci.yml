@@ -33,8 +33,13 @@ jobs:
         run: python src/governed_core/verify_core.py
 
       - name: Install + test
+        # The tests import the package from src/ (not an installed copy) so the lock, the flat-import
+        # path and the tests all see the same files. This step used to run without PYTHONPATH and
+        # failed on every push since 1.3.1 (ModuleNotFoundError: governed_core) — fixed in 1.6.0.
+        env:
+          PYTHONPATH: src
         run: |
-          python -m pip install --quiet "pytest==9.1.1" "ruff==0.15.22" build
+          python -m pip install --quiet "pytest==9.1.1" "ruff==0.15.22" build boto3
           python -m pytest tests -q
 
       - name: Lint (bug-class checks)

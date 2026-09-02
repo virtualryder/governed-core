@@ -38,10 +38,16 @@ def _refuse(context, case_id, requester, approver, reason):
             "approver": approver, "reason": reason}
 
 
+def _pending_table(region):
+    # core 1.6.0: the pending-approvals register is per tenant in the hybrid model (fail-closed in MT).
+    return boto3.resource("dynamodb", region_name=region).Table(
+        evidence.route_table(PENDING_TABLE, "pending-approvals"))
+
+
 def _approval_path(case_id, approver, region):
     """Return (verified: bool, detail: str) for how this approval reached finalize."""
     try:
-        tbl = boto3.resource("dynamodb", region_name=region).Table(PENDING_TABLE)
+        tbl = _pending_table(region)
         row = tbl.get_item(Key={"case_id": str(case_id)}).get("Item") or {}
     except Exception as exc:  # table unreadable -> cannot verify -> not verified (fail-closed)
         return False, "pending-approvals row unreadable: %s" % type(exc).__name__
@@ -60,6 +66,7 @@ def _exactly_once_marker(case_id, submission_id, approver, region):
     """EXACTLY-ONCE finalization (GA-5) — preserved verbatim from governed-core 1.4.0."""
     from botocore.exceptions import ClientError
     table = os.environ.get("AUDIT_TABLE", "governed-audit-ledger")
+    table = evidence.route_table(table, "audit-ledger")   # core 1.6.0: per-tenant ledger (fail-closed in MT)
     cli = boto3.resource("dynamodb", region_name=region).Table(table)
     try:
         cli.put_item(Item={"audit_id": "FINAL#" + str(case_id), "submission_id": submission_id,
@@ -74,6 +81,7 @@ def _exactly_once_marker(case_id, submission_id, approver, region):
 
 
 def handler(event, context):
+    evidence.bind_tenant(event)   # core 1.6.0: signed tenant pair from the workflow input
     case_id = event.get("case_id") or event.get("icsr_id")
     requester = event.get("requester")
     approver = event.get("approver")

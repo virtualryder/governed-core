@@ -18,8 +18,17 @@ import identity
 SM_NAME = os.environ.get("SM_NAME", "governed-signoff")
 
 
+def _tenant_binding():
+    try:
+        import tenancy
+        return tenancy.signed_binding()
+    except ImportError:
+        return {}
+
+
 def handler(event, context):
     e = evidence._coerce(event)
+    evidence.bind_tenant(e)   # core 1.6.0: interceptor-injected signed tenant (gateway tool)
     region = os.environ.get("AWS_REGION", "us-east-1")
     acct = context.invoked_function_arn.split(":")[4]
     case_id = e.get("case_id") or e.get("icsr_id", "")
@@ -44,7 +53,10 @@ def handler(event, context):
     try:
         r = boto3.client("stepfunctions", region_name=region).start_execution(
             stateMachineArn=sm_arn,
-            input=json.dumps({"case_id": case_id, "icsr_id": case_id, "requester": requester}),
+            # core 1.6.0: carry the acting tenant into the execution as the SIGNED pair (no interceptor
+            # on the Step Functions hop); every downstream Lambda re-verifies it. {} in silo mode.
+            input=json.dumps({"case_id": case_id, "icsr_id": case_id, "requester": requester,
+                              **_tenant_binding()}),
         )
         return {"requested": True, "phase": "PENDING_APPROVAL", "execution_arn": r["executionArn"],
                 "case_id": case_id, "requester": requester,

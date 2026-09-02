@@ -28,6 +28,7 @@ def _deny(context, src, case_id, actor, reason):
 
 def handler(event, context):
     e = evidence._coerce(event)
+    evidence.bind_tenant(e)   # core 1.6.0: interceptor-injected signed tenant (gateway tool)
     region = os.environ.get("AWS_REGION", "us-east-1")
     src = os.environ.get("SOURCE", "approve")
     case_id = e.get("case_id") or e.get("icsr_id")
@@ -44,7 +45,8 @@ def handler(event, context):
     if not approver:
         return _deny(context, src, case_id, None, "verified token carries no usable identity")
 
-    tbl = boto3.resource("dynamodb", region_name=region).Table(PENDING_TABLE)
+    tbl = boto3.resource("dynamodb", region_name=region).Table(
+        evidence.route_table(PENDING_TABLE, "pending-approvals"))
     sfn = boto3.client("stepfunctions", region_name=region)
 
     item = tbl.get_item(Key={"case_id": case_id}).get("Item")

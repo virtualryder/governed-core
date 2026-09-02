@@ -135,6 +135,36 @@ def _transact(ddb_cli, table, rec, expected_tip):
     ])
 
 
+def route_table(name, logical):
+    """Per-tenant routing hook for a DynamoDB store name. `tenancy` ships in this package (flat
+    import); an agent may shadow it with a declared domain override. Silo mode: identity.
+    Multi-tenant: '<prefix>-<tenant>-<logical>' from the verified binding, TenantError if none."""
+    try:
+        import tenancy
+    except ImportError:
+        return name
+    return tenancy.route_store(name, logical)
+
+
+def route_bucket(bucket):
+    """Per-tenant routing hook for the WORM vault name (see tenancy.route_bucket). Silo: identity."""
+    try:
+        import tenancy
+    except ImportError:
+        return bucket
+    return tenancy.route_bucket(bucket)
+
+
+def bind_tenant(event):
+    """Handler-entry helper: verify + bind the interceptor/workflow-injected signed tenant pair so
+    every evidence write in this invocation routes to the acting tenant. No-op in silo mode."""
+    try:
+        import tenancy
+    except ImportError:
+        return None
+    return tenancy.bind_tenant_from_args(event if isinstance(event, dict) else _coerce(event))
+
+
 def record_event(event, context, source=None):
     e = _coerce(event)
     region = _env("AWS_REGION", "us-east-1")
@@ -145,6 +175,14 @@ def record_event(event, context, source=None):
         pass
     table = _env("AUDIT_TABLE") or "evidence-audit"
     bucket = _env("AUDIT_BUCKET") or ("evidence-worm-%s-%s" % (acct, region))
+    # Hybrid multi-tenant (core 1.6.0): route to the ACTING tenant's PHYSICAL ledger + WORM vault.
+    # Silo deployments are untouched (route_* return the names unchanged). FAIL-CLOSED: in
+    # multi-tenant mode a writer with no verified tenant binding gets stored:false — never a
+    # silent write into the shared base ledger.
+    try:
+        table, bucket = route_table(table, "audit-ledger"), route_bucket(bucket)
+    except Exception as exc:   # tenancy.TenantError (kept generic: tenancy is a flat import)
+        return {"stored": False, "error": "multi-tenant routing refused: %s" % exc}
     logical = build_logical(e, source)
     if not logical["case_id"]:
         return {"stored": False, "error": "case_id (or icsr_id) is required for an evidence record"}

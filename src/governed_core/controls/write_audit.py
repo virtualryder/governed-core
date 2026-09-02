@@ -11,4 +11,5 @@ build_record = evidence.build_record
 
 
 def handler(event, context):
+    evidence.bind_tenant(event)   # core 1.6.0: signed tenant pair (gateway interceptor / workflow input)
     return evidence.record_event(event, context)
