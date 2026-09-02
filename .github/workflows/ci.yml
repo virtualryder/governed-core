@@ -11,6 +11,10 @@ jobs:
   verify:
     name: integrity · tests · wheel
     runs-on: ubuntu-latest
+    # contents:write is what `gh release upload` needs; without it the tag run failed with HTTP 403
+    # on every release through v1.6.0, so the release assets were uploaded by hand from a local build.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,8 +51,13 @@ jobs:
 
       # Build on every run, not just on tags: a wheel that only builds at release time is a wheel
       # that breaks at release time.
+      # REPRODUCIBLE: the zip timestamps come from the commit time, so a local build of the same
+      # commit yields the same bytes and the same sha256 as CI's (v1.6.0's local vs CI builds differed
+      # only by timestamps; the published asset is what the consumers' hash pins verify).
       - name: Build wheel
-        run: python -m build --wheel
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          python -m build --wheel
 
       - name: Record the artifact hash
         run: |

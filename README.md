@@ -72,11 +72,11 @@ sibling," which was never true and cannot be, because the domain-shaped modules 
 python -m pytest tests -q
 python src/governed_core/verify_core.py          # must exit 0
 python src/governed_core/regen_core_lock.py --bump minor   # if the core changed
-python -m build --wheel
+SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --wheel   # reproducible: same bytes as CI
 ```
 
-Then attach the wheel and its sha256 to a GitHub Release tagged `v<version>`, and bump the pin in each
-consumer. `verify_core.py`, the version-sync test, and the wheel build all run in CI on every push.
+Then tag `v<version>`, create the GitHub Release, and let CI attach the wheel and `RELEASE-HASHES.txt`
+(the tag run has `contents: write`); bump the pin in each consumer to the hash on the release. `verify_core.py`, the version-sync test, and the wheel build all run in CI on every push.
 
 ## License
 
