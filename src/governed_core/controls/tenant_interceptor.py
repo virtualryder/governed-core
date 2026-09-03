@@ -63,7 +63,11 @@ def build_output(event, secret, multitenant):
     # phase 110: correlation keys from the headers ADOT/AgentCore put on the runtime's outbound call
     # (traceparent / X-Amzn-Trace-Id, baggage session.id, mcp-session-id). Observability only —
     # the tenant above stays the sole signed, trusted field.
-    trace = telemetry.from_headers(gw.get("headers"))
+    # The MCP client (Strands/mcp SDK) propagates the OTEL context in `params._meta` (traceparent,
+    # X-Amzn-Trace-Id, baggage) - seen live 2026-09-02: the gateway forwards it verbatim - so read
+    # both the HTTP headers and `_meta`; `_meta` wins (it is what the runtime's own span injected).
+    meta = {k: v for k, v in (params.get("_meta") or {}).items() if isinstance(v, str)}
+    trace = telemetry.from_headers({**(gw.get("headers") or {}), **meta})
     trace.pop("baggage_tenant", None)
     if trace:
         args[telemetry.TRACE_FIELD] = json.dumps(trace, sort_keys=True)

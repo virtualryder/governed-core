@@ -52,6 +52,16 @@ def test_interceptor_injects_trace_next_to_signed_tenant(monkeypatch):
     trace = json.loads(args[telemetry.TRACE_FIELD])
     assert trace == {"trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "span_id": "00f067aa0ba902b7",
                      "session_id": "sess-123", "mcp_session_id": "mcp-9"}   # caller value OVERWRITTEN, no tenant
+    # the MCP SDK carries the context in params._meta (seen live): it is read too, and wins over headers
+    ev["mcp"]["gatewayRequest"]["body"]["params"]["_meta"] = {
+        "baggage": "Self=1-6a98c247-7b8842eb71e3ce9f43461b21,session.id=rt-sess,tenant=pha-a,case_id=OBS-1",
+        "X-Amzn-Trace-Id": "Root=1-6a98c247-193b89973ebc361d57b98c5c;Parent=8e78ac8e935b76db;Sampled=1",
+        "traceparent": "00-6a98c247193b89973ebc361d57b98c5c-8e78ac8e935b76db-01"}
+    args = ti.build_output(ev, SECRET, True)["mcp"]["transformedGatewayRequest"]["body"]["params"]["arguments"]
+    trace = json.loads(args[telemetry.TRACE_FIELD])
+    assert trace["trace_id"] == "6a98c247193b89973ebc361d57b98c5c" and trace["session_id"] == "rt-sess" and trace["case_id"] == "OBS-1"
+    assert telemetry.bind({"case": "x", telemetry.TRACE_FIELD: args[telemetry.TRACE_FIELD]}, None)["case_id"] == "OBS-1"
+    telemetry.clear()
     # silo (no tenant on the identity, not multitenant): trace still injected, no tenant pair
     ev["mcp"]["gatewayRequest"]["headers"]["Authorization"] = "Bearer " + _jwt({"sub": "u"})
     args = ti.build_output(ev, SECRET, False)["mcp"]["transformedGatewayRequest"]["body"]["params"]["arguments"]

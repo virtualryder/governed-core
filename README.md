@@ -28,7 +28,7 @@ This package is the fix: one artifact, one version, consumed by pinned hash inst
 Pin the released wheel by URL and hash. Nothing here is on PyPI.
 
 ```
-governed-core @ https://github.com/virtualryder/governed-core/releases/download/v1.7.0/governed_core-1.7.0-py3-none-any.whl \
+governed-core @ https://github.com/virtualryder/governed-core/releases/download/v1.7.1/governed_core-1.7.1-py3-none-any.whl \
   --hash=sha256:<see RELEASE-HASHES.txt on the release>
 ```
 

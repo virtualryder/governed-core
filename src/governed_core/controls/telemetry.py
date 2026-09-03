@@ -89,6 +89,8 @@ def from_headers(headers):
         out["session_id"] = session
     if bag.get("tenant"):
         out["baggage_tenant"] = bag["tenant"]     # informational only; NEVER used for routing
+    if bag.get("case_id"):
+        out["case_id"] = bag["case_id"]           # the runtime's case (tool args often carry none)
     mcp = (h.get("mcp-session-id") or "").strip()
     if mcp:
         out["mcp_session_id"] = mcp
@@ -117,7 +119,7 @@ def bind(event, context=None):
         except Exception:
             raw = {}
     if isinstance(raw, dict):
-        for k in ("trace_id", "span_id", "session_id", "mcp_session_id"):
+        for k in ("trace_id", "span_id", "session_id", "mcp_session_id", "case_id"):
             v = raw.get(k)
             if isinstance(v, str) and v.strip():
                 ctx[k] = v.strip()
@@ -133,7 +135,7 @@ def bind(event, context=None):
         ctx["request_id"] = str(rid)
     cid = e.get("case_id") or e.get("icsr_id")
     if isinstance(cid, str) and cid.strip():
-        ctx["case_id"] = cid.strip()
+        ctx["case_id"] = cid.strip()              # the tool's own case id wins over the baggage one
     _CTX.set(ctx)
     return ctx
 
