@@ -16,6 +16,7 @@ Contract: AgentCore interceptor input/output v1.0. Pure stdlib; offline unit-tes
 import json
 import os
 
+import budget
 import kill_switch
 import telemetry
 import tenancy
@@ -67,6 +68,26 @@ def _audit_denial(engaged, gw, body, context):
         telemetry.clear()
 
 
+def _audit_budget_denial(decision, gw, body, context, tenant):
+    params = body.get("params") or {}
+    args = params.get("arguments") or {}
+    meta = {k: v for k, v in (params.get("_meta") or {}).items() if isinstance(v, str)}
+    try:
+        telemetry.bind({telemetry.TRACE_FIELD: json.dumps(
+            telemetry.from_headers({**(gw.get("headers") or {}), **meta}))}, context)
+    except Exception:
+        pass
+    tenancy.set_request_claims({tenancy._CLAIM: tenant} if tenant else None)
+    try:
+        ev = {"case_id": args.get("case_id") if isinstance(args.get("case_id"), str) else None,
+              "tool": (params.get("name") or "")}
+        audit = budget.record_denial(decision, ev, context, component="interceptor")
+        budget.log_line(decision, component="interceptor", audit=audit)
+    finally:
+        tenancy.clear_request_claims()
+        telemetry.clear()
+
+
 def build_output(event, secret, multitenant, context=None):
     """Pure core. Returns the interceptor output for one gateway request."""
     gw = ((event or {}).get("mcp") or {}).get("gatewayRequest") or {}
@@ -87,6 +108,20 @@ def build_output(event, secret, multitenant, context=None):
     tenant = tenancy.tenant_from_bearer(_bearer(gw.get("headers")))
     if not tenant and multitenant:
         return _deny(rid, "multi-tenant: identity carries no tenant (custom:tenant); refused")
+    # core 1.9.0 (task 128): a tenant AT or OVER its period budget is refused at the gateway too (tool calls
+    # that spend no tokens included) - 403 + DENIED record in that tenant's ledger. HARD caps only; a SOFT
+    # breach is logged and the call proceeds. Silo deployments meter the pinned TENANT_ID.
+    metered = tenant if multitenant else (tenant or tenancy.resolve_tenant())
+    try:
+        soft = budget.check(metered)
+        if soft:
+            budget.log_line(soft, component="interceptor", outcome="soft_breach:budget")
+    except budget.BudgetExceeded as exc:
+        _audit_budget_denial(exc.decision, gw, body, context, tenant)
+        return _deny(rid, "budget exceeded (%s): the tenant's period cap is reached; refused"
+                     % exc.decision.get("tenant"))
+    except Exception as exc:                       # never let metering break the request path
+        print(json.dumps({"aegis": "budget", "component": "interceptor", "outcome": "check_error:" + type(exc).__name__}))
     params = dict(body.get("params") or {})
     args = dict(params.get("arguments") or {})
     args.pop(tenancy.TENANT_FIELD, None)           # OVERWRITE anything the caller/model supplied
