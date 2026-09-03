@@ -1,0 +1,16 @@
+# Line endings (platform COPILOT-4, 2026-09-03, applied preventively): shell scripts, Python, YAML,
+# JSON and TOML are LF in the repository. A script committed with CRLF fails on Linux
+# (`set -euo pipefail\r`: "invalid option name"). Binary/office files stay opaque.
+*.sh    text eol=lf
+*.py    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.toml  text eol=lf
+*.pptx  binary
+*.docx  binary
+*.xlsx  binary
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.drawio text eol=lf
