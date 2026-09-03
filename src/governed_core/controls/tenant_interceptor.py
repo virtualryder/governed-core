@@ -16,10 +16,12 @@ Contract: AgentCore interceptor input/output v1.0. Pure stdlib; offline unit-tes
 import json
 import os
 
+import kill_switch
 import telemetry
 import tenancy
 
 _TOOLS_CALL = "tools/call"
+_CONTAINED = ("tools/call", "tools/list")       # what the kill switch short-circuits (initialize passes)
 
 
 def _bearer(headers):
@@ -42,12 +44,45 @@ def _deny(rid, message):
                          "error": {"code": -32000, "message": message}}}}}
 
 
-def build_output(event, secret, multitenant):
+def _audit_denial(engaged, gw, body, context):
+    """Bind the VERIFIED tenant (from the validated bearer) so the denial routes to that tenant's
+    ledger, write it, log it. Never raises; an unwritable ledger is reported in the log line."""
+    params = body.get("params") or {}
+    args = params.get("arguments") or {}
+    meta = {k: v for k, v in (params.get("_meta") or {}).items() if isinstance(v, str)}
+    try:
+        telemetry.bind({telemetry.TRACE_FIELD: json.dumps(
+            telemetry.from_headers({**(gw.get("headers") or {}), **meta}))}, context)
+    except Exception:
+        pass
+    tenant = tenancy.tenant_from_bearer(_bearer(gw.get("headers")))
+    tenancy.set_request_claims({tenancy._CLAIM: tenant} if tenant else None)
+    try:
+        ev = {"case_id": args.get("case_id") if isinstance(args.get("case_id"), str) else None,
+              "tool": (params.get("name") or body.get("method") or "")}
+        audit = kill_switch.record_denial(engaged, ev, context, component="interceptor")
+        kill_switch.log_line(engaged, component="interceptor", audit=audit)
+    finally:
+        tenancy.clear_request_claims()
+        telemetry.clear()
+
+
+def build_output(event, secret, multitenant, context=None):
     """Pure core. Returns the interceptor output for one gateway request."""
     gw = ((event or {}).get("mcp") or {}).get("gatewayRequest") or {}
     body = gw.get("body") or {}
     rid = body.get("id", 1)
-    if body.get("method") != _TOOLS_CALL:
+    method = body.get("method")
+    # core 1.8.0: CONTAINMENT FIRST. The kill switch is checked before tenancy, before the target,
+    # before anything else: engaged => 403 to the caller (the gateway never invokes the target) and a
+    # DENIED record in the acting tenant's WORM ledger. Fail-closed on an unreadable switch.
+    if method in _CONTAINED:
+        engaged = kill_switch.check()
+        if engaged:
+            _audit_denial(engaged, gw, body, context)
+            return _deny(rid, "containment engaged (kill switch %s): every agent action is refused"
+                         % engaged.get("source", ""))
+    if method != _TOOLS_CALL:
         return _pass_through(body)                 # nothing to inject
     tenant = tenancy.tenant_from_bearer(_bearer(gw.get("headers")))
     if not tenant and multitenant:
@@ -85,4 +120,4 @@ def handler(event, context):
         secret = provenance._secret()
     except Exception:
         secret = (os.environ.get("PROVENANCE_SECRET") or "").encode("utf-8")
-    return build_output(event, secret, tenancy.multitenant_enabled())
+    return build_output(event, secret, tenancy.multitenant_enabled(), context)

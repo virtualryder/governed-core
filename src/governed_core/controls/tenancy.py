@@ -41,6 +41,11 @@ _CLAIM = "custom:tenant"         # the VERIFIED JWT claim carrying the tenant id
 _GROUPS_CLAIM = "cognito:groups"  # ALWAYS in a Cognito ACCESS token (custom attrs are not) - Cedar reads it
 TENANT_GROUP_PREFIX = "tenant_"   # tenant membership as a Cognito group: tenant_<id>
 DEFAULT_TENANT = "default"
+# core 1.8.0: a deployment-wide CONTROL-PLANE scope (kill-switch state changes, and nothing else so far).
+# A trusted control component binds it explicitly (bind_platform_scope); route_* then return the BASE
+# (deployment) ledger / vault even in multi-tenant mode. It can never arrive through tool arguments:
+# verified_tenant_from_args refuses it even with a valid signature.
+PLATFORM_SCOPE = "__platform__"
 
 # Request-scoped VERIFIED claims. The Lambda entrypoint binds these once per invocation at the trusted
 # boundary (set_request_claims), so the data-access layer can route to the acting tenant's store WITHOUT
@@ -55,6 +60,17 @@ def set_request_claims(claims):
 
 def clear_request_claims():
     _REQUEST_CLAIMS.set(None)
+
+
+def bind_platform_scope():
+    """Trusted control-plane entry (kill_switch_control): route evidence to the deployment's BASE
+    ledger + vault. Never call this from a tool handler — tools act for a tenant, not for the platform."""
+    _REQUEST_CLAIMS.set({_CLAIM: PLATFORM_SCOPE})
+
+
+def platform_scoped(claims=None):
+    c = _effective_claims(claims)
+    return bool(c) and c.get(_CLAIM) == PLATFORM_SCOPE
 
 
 def _effective_claims(claims):
@@ -150,7 +166,7 @@ def route_store(silo_name, logical, claims=None):
     multi-tenant: '<prefix>-<tenant>-<logical>' from the VERIFIED claim (request context or explicit),
     FAIL-CLOSED if no tenant. `logical` is the store's stable suffix (e.g. 'case-store'), used to locate
     the insertion point so the derived name matches the CDK's per-tenant DataStack naming exactly."""
-    if not multitenant_enabled():
+    if not multitenant_enabled() or platform_scoped(claims):
         return silo_name
     tenant = resolve_tenant(claims=claims)          # raises TenantError if no verified tenant
     suffix = "-" + logical
@@ -170,7 +186,7 @@ def route_bucket(silo_bucket, claims=None):
     otherwise the tenant is inserted before the '-worm-' marker. FAIL-CLOSED: no verified tenant, or a
     silo bucket name the router cannot map, raises TenantError — an evidence record is NEVER written
     to the shared base vault in multi-tenant mode."""
-    if not multitenant_enabled():
+    if not multitenant_enabled() or platform_scoped(claims):
         return silo_bucket
     tenant = resolve_tenant(claims=claims)
     tmpl = os.environ.get(_BUCKET_TEMPLATE_ENV, "").strip()
@@ -207,6 +223,8 @@ def verified_tenant_from_args(args, secret):
     if not isinstance(t, str) or not t.strip() or not isinstance(sig, str):
         return None
     t = t.strip()
+    if t == PLATFORM_SCOPE:                       # control-plane scope is never a request tenant
+        return None
     if not hmac.compare_digest(sign_tenant(t, secret), sig):
         return None
     return t

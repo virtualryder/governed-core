@@ -28,7 +28,7 @@ This package is the fix: one artifact, one version, consumed by pinned hash inst
 Pin the released wheel by URL and hash. Nothing here is on PyPI.
 
 ```
-governed-core @ https://github.com/virtualryder/governed-core/releases/download/v1.7.1/governed_core-1.7.1-py3-none-any.whl \
+governed-core @ https://github.com/virtualryder/governed-core/releases/download/v1.8.0/governed_core-1.8.0-py3-none-any.whl \
   --hash=sha256:<see RELEASE-HASHES.txt on the release>
 ```
 
@@ -39,7 +39,7 @@ property that makes this a dependency rather than a copy with extra steps.
 
 | Path | What it is |
 |---|---|
-| `src/governed_core/controls/` | The control plane. `evidence.py` (hash-chained append-only ledger), `verify_chain.py`, `write_audit.py`, `identity.py`, `request_signoff.py` / `approve_signoff.py` (separation of duties), `finalize_signoff.py` (exactly-once commit gate), `tenancy.py` + `tenant_interceptor.py` (hybrid multi-tenant: tenant DERIVED from the verified identity by the AgentCore Gateway request interceptor, carried as an HMAC-signed pair, and the ledger / WORM vault / approvals register routed to the acting tenant's physically separate stores — 1.6.0), `telemetry.py` (1.7.0: one correlation set — tenant · session · trace · mcp-session · execution · request · case — carried by the interceptor and the workflow, hashed into every WORM record, and emitted as one structured `aegis.call` log line per tool invocation), `mcp_client.py`, `idp_group_mapper.py`. |
+| `src/governed_core/controls/` | The control plane. `evidence.py` (hash-chained append-only ledger), `verify_chain.py`, `write_audit.py`, `identity.py`, `request_signoff.py` / `approve_signoff.py` (separation of duties), `finalize_signoff.py` (exactly-once commit gate), `tenancy.py` + `tenant_interceptor.py` (hybrid multi-tenant: tenant DERIVED from the verified identity by the AgentCore Gateway request interceptor, carried as an HMAC-signed pair, and the ledger / WORM vault / approvals register routed to the acting tenant's physically separate stores — 1.6.0), `telemetry.py` (1.7.0: one correlation set — tenant · session · trace · mcp-session · execution · request · case — carried by the interceptor and the workflow, hashed into every WORM record, and emitted as one structured `aegis.call` log line per tool invocation), `kill_switch.py` + `kill_switch_control.py` (1.8.0: the one-command CONTAINMENT control on the AgentCore path — every component reads the deployment's SSM kill-switch FIRST, fail-closed, 15 s TTL; the interceptor short-circuits with 403 and a DENIED WORM record, tool Lambdas refuse at `telemetry.instrument`; engage / disengage are two IAM-authenticated function URLs with IAM-verified actors, separation of duties on release, every state change a COMMITTED ledger record), `mcp_client.py`, `idp_group_mapper.py`. |
 | `src/governed_core/engine/` | Deploy engine — manifest rendering, Cedar policy and Step Functions ASL templates. |
 | `src/governed_core/runtime/` | The AgentCore runtime image and its bootstrap scripts. |
 | `src/governed_core/connector/` | System-of-record connector scaffolding and source verification. |
@@ -76,6 +76,7 @@ sibling," which was never true and cannot be, because the domain-shaped modules 
 | 1.6.0 | **hybrid multi-tenant**: `tenancy` + `tenant_interceptor` promoted into the core; the canonical evidence writer, exactly-once `FINAL#` marker and pending-approvals register route to the acting tenant's own ledger / WORM vault / approvals table, fail-closed; the signed tenant pair rides the Step Functions execution input | benefits `evidence/AGENTCORE-MULTITENANT-AUDIT-2026-09-02.md` (2 tenants, 12/12) |
 | 1.7.0 | **correlation** (`telemetry.py`): tenant · session · trace · mcp-session · execution · request · case carried by the interceptor and the workflow, hashed into every WORM record, one structured `aegis.call` log line per tool invocation; `evidence.tenant_id` is the DERIVED tenant | — |
 | 1.7.1 | interceptor reads the MCP `params._meta` trace context (what the Strands MCP client actually propagates) | benefits `evidence/AGENTCORE-OBSERVABILITY-2026-09-02.md` (real AgentCore Runtime, 2 tenants, 13/13 each) |
+| 1.8.0 | **kill switch** (`kill_switch.py`, `kill_switch_control.py`): containment precedes evaluation on the AgentCore path — interceptor (403 + DENIED WORM record in the acting tenant's ledger), every tool Lambda (`telemetry.instrument` raises `KillSwitchEngaged`), runtime hook; fail-closed on an unreadable switch; many-to-one (deployment + platform-wide parameters); engage-only / disengage-only controller functions with IAM-verified actors and SoD on release; `tenancy.PLATFORM_SCOPE` for deployment-wide control-plane records (never injectable via tool args) | benefits `evidence/AGENTCORE-KILL-SWITCH-2026-09-03.md` (pending) |
 
 Consumers pin one of these by URL + sha256 (`requirements-core.txt`, `--require-hashes`); the wheel and
 `RELEASE-HASHES.txt` on each release are attached by CI (from 1.7.0; earlier releases were hand-uploaded).

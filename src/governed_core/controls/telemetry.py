@@ -218,6 +218,20 @@ def instrument(tool):
         @functools.wraps(fn)
         def wrapped(event, context=None):
             bind(event, context)
+            # core 1.8.0: CONTAINMENT precedes evaluation. The kill switch is read before the handler
+            # runs (fail-closed, cached); engaged => one aegis.call line with outcome denied:kill_switch,
+            # one aegis.kill_switch line, then KillSwitchEngaged propagates (a Step Functions task fails
+            # with that error name; a direct invoke returns it as the function error).
+            try:
+                import kill_switch
+                engaged = kill_switch.check()
+            except ImportError:
+                engaged = None
+            if engaged:
+                log_call(tool, event, "denied:kill_switch", 0)
+                kill_switch.log_line(engaged, component="tool:" + tool)
+                clear()
+                raise kill_switch.KillSwitchEngaged(engaged)
             t0 = time.time()
             try:
                 out = fn(event, context)
