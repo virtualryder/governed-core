@@ -2,6 +2,7 @@ import json
 import os
 import boto3
 from botocore.exceptions import ClientError
+import telemetry
 import evidence
 import identity
 
@@ -26,6 +27,7 @@ def _deny(context, src, case_id, actor, reason):
     return {"approved": False, "case_id": case_id, "reason": reason}
 
 
+@telemetry.instrument('approve_signoff')
 def handler(event, context):
     e = evidence._coerce(event)
     evidence.bind_tenant(e)   # core 1.6.0: interceptor-injected signed tenant (gateway tool)

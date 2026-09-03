@@ -28,7 +28,7 @@ This package is the fix: one artifact, one version, consumed by pinned hash inst
 Pin the released wheel by URL and hash. Nothing here is on PyPI.
 
 ```
-governed-core @ https://github.com/virtualryder/governed-core/releases/download/v1.6.0/governed_core-1.6.0-py3-none-any.whl \
+governed-core @ https://github.com/virtualryder/governed-core/releases/download/v1.7.0/governed_core-1.7.0-py3-none-any.whl \
   --hash=sha256:<see RELEASE-HASHES.txt on the release>
 ```
 
@@ -39,7 +39,7 @@ property that makes this a dependency rather than a copy with extra steps.
 
 | Path | What it is |
 |---|---|
-| `src/governed_core/controls/` | The control plane. `evidence.py` (hash-chained append-only ledger), `verify_chain.py`, `write_audit.py`, `identity.py`, `request_signoff.py` / `approve_signoff.py` (separation of duties), `finalize_signoff.py` (exactly-once commit gate), `tenancy.py` + `tenant_interceptor.py` (hybrid multi-tenant: tenant DERIVED from the verified identity by the AgentCore Gateway request interceptor, carried as an HMAC-signed pair, and the ledger / WORM vault / approvals register routed to the acting tenant's physically separate stores — 1.6.0), `mcp_client.py`, `idp_group_mapper.py`. |
+| `src/governed_core/controls/` | The control plane. `evidence.py` (hash-chained append-only ledger), `verify_chain.py`, `write_audit.py`, `identity.py`, `request_signoff.py` / `approve_signoff.py` (separation of duties), `finalize_signoff.py` (exactly-once commit gate), `tenancy.py` + `tenant_interceptor.py` (hybrid multi-tenant: tenant DERIVED from the verified identity by the AgentCore Gateway request interceptor, carried as an HMAC-signed pair, and the ledger / WORM vault / approvals register routed to the acting tenant's physically separate stores — 1.6.0), `telemetry.py` (1.7.0: one correlation set — tenant · session · trace · mcp-session · execution · request · case — carried by the interceptor and the workflow, hashed into every WORM record, and emitted as one structured `aegis.call` log line per tool invocation), `mcp_client.py`, `idp_group_mapper.py`. |
 | `src/governed_core/engine/` | Deploy engine — manifest rendering, Cedar policy and Step Functions ASL templates. |
 | `src/governed_core/runtime/` | The AgentCore runtime image and its bootstrap scripts. |
 | `src/governed_core/connector/` | System-of-record connector scaffolding and source verification. |

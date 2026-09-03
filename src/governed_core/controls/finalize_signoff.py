@@ -1,6 +1,7 @@
 import os
 import hashlib
 import boto3
+import telemetry
 import evidence
 
 # finalize_signoff — the PRIVILEGED commit task, invoked by the sign-off state machine ONLY after a
@@ -80,6 +81,7 @@ def _exactly_once_marker(case_id, submission_id, approver, region):
         raise
 
 
+@telemetry.instrument('finalize_signoff')
 def handler(event, context):
     evidence.bind_tenant(event)   # core 1.6.0: signed tenant pair from the workflow input
     case_id = event.get("case_id") or event.get("icsr_id")

@@ -1,6 +1,7 @@
 import json
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+import telemetry
 
 # mask_pii — fail-closed general PII de-identification via Amazon Comprehend DetectPiiEntities
 # (name, SSN, address, DOB, phone, email, bank/routing, etc.). Reusable control for non-health
@@ -16,6 +17,7 @@ def _coerce(e):
             return {"case": e}
     return e
 
+@telemetry.instrument('mask_pii')
 def handler(event, context):
     e = _coerce(event)
     case = e.get("case", e.get("application", ""))

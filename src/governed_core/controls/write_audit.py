@@ -1,3 +1,4 @@
+import telemetry
 import evidence
 
 # write_audit — the gateway-exposed evidence tool. Thin wrapper over the CANONICAL evidence service
@@ -10,6 +11,7 @@ chain_hash = evidence.chain_hash
 build_record = evidence.build_record
 
 
+@telemetry.instrument('write_audit')
 def handler(event, context):
     evidence.bind_tenant(event)   # core 1.6.0: signed tenant pair (gateway interceptor / workflow input)
     return evidence.record_event(event, context)

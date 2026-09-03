@@ -77,7 +77,12 @@ def build_logical(e, source):
         "actor": e.get("actor", ""),
         "deidentified": e.get("deidentified"),
         "payload": e.get("payload", {}),
-        "tenant_id": e.get("tenant_id") or _env("TENANT_ID", "default"),
+        # tenant is DERIVED (tenancy.py): the request-bound tenant in multi-tenant mode, the pinned
+        # silo id otherwise. A body-supplied tenant_id is ignored (core 1.7.0; was env-or-body).
+        "tenant_id": _derived_tenant() or "default",
+        # phase 110: the STABLE correlation keys (trace/session/mcp-session/execution + tenant) are part
+        # of the hashed logical record, so the ledger row and its WORM copy PROVE their own join keys.
+        "correlation": _correlation(),
         "policy_version": _env("POLICY_VERSION", "unset"),
         "rule_version": _env("RULE_VERSION", "unset"),
         "model_id": e.get("model_id") or _env("MODEL_ID", "unset"),
@@ -86,12 +91,41 @@ def build_logical(e, source):
     }
 
 
+def _derived_tenant():
+    try:
+        import telemetry
+        return telemetry._tenant()
+    except ImportError:
+        return _env("TENANT_ID", "default")
+
+
+def _correlation():
+    try:
+        import telemetry
+        return telemetry.correlation_for_record()
+    except ImportError:
+        return {}
+
+
+def _invocation():
+    try:
+        import telemetry
+        return telemetry.invocation_for_record()
+    except ImportError:
+        return {}
+
+
 def build_record(logical, seq, prev_hash):
     audit_id = hashlib.sha256(_canonical(logical).encode("utf-8")).hexdigest()
     payload_sha = hashlib.sha256(_canonical(logical.get("payload", {})).encode("utf-8")).hexdigest()
     rec = dict(logical)
     rec.update({"audit_id": audit_id, "payload_sha256": payload_sha,
                 "recorded_at": int(time.time()), "seq": seq})
+    # per-invocation keys (span, Lambda request id): chained (entry_hash) but NOT part of audit_id, so
+    # an exact replay of the same logical event is still recognised as a replay (append-only proof).
+    inv = _invocation()
+    if inv:
+        rec["invocation"] = inv
     eh = entry_hash(rec)
     rec["prev_hash"] = prev_hash or GENESIS
     rec["entry_hash"] = eh

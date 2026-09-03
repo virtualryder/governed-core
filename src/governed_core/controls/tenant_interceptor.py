@@ -13,8 +13,10 @@ FAIL-CLOSED: in multi-tenant mode a tools/call with no tenant on the identity is
 target is never invoked. tools/list and other methods pass through unchanged. Silo mode injects nothing.
 
 Contract: AgentCore interceptor input/output v1.0. Pure stdlib; offline unit-testable."""
+import json
 import os
 
+import telemetry
 import tenancy
 
 _TOOLS_CALL = "tools/call"
@@ -48,16 +50,23 @@ def build_output(event, secret, multitenant):
     if body.get("method") != _TOOLS_CALL:
         return _pass_through(body)                 # nothing to inject
     tenant = tenancy.tenant_from_bearer(_bearer(gw.get("headers")))
-    if not tenant:
-        if multitenant:
-            return _deny(rid, "multi-tenant: identity carries no tenant (custom:tenant); refused")
-        return _pass_through(body)                 # silo: no injection
+    if not tenant and multitenant:
+        return _deny(rid, "multi-tenant: identity carries no tenant (custom:tenant); refused")
     params = dict(body.get("params") or {})
     args = dict(params.get("arguments") or {})
     args.pop(tenancy.TENANT_FIELD, None)           # OVERWRITE anything the caller/model supplied
     args.pop(tenancy.TENANT_SIG_FIELD, None)
-    args[tenancy.TENANT_FIELD] = tenant
-    args[tenancy.TENANT_SIG_FIELD] = tenancy.sign_tenant(tenant, secret)
+    args.pop(telemetry.TRACE_FIELD, None)
+    if tenant:                                     # silo identities carry no tenant: no injection
+        args[tenancy.TENANT_FIELD] = tenant
+        args[tenancy.TENANT_SIG_FIELD] = tenancy.sign_tenant(tenant, secret)
+    # phase 110: correlation keys from the headers ADOT/AgentCore put on the runtime's outbound call
+    # (traceparent / X-Amzn-Trace-Id, baggage session.id, mcp-session-id). Observability only —
+    # the tenant above stays the sole signed, trusted field.
+    trace = telemetry.from_headers(gw.get("headers"))
+    trace.pop("baggage_tenant", None)
+    if trace:
+        args[telemetry.TRACE_FIELD] = json.dumps(trace, sort_keys=True)
     params["arguments"] = args
     new_body = dict(body)
     new_body["params"] = params

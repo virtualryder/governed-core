@@ -2,6 +2,7 @@ import json
 import os
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
+import telemetry
 import evidence
 import identity
 
@@ -26,6 +27,7 @@ def _tenant_binding():
         return {}
 
 
+@telemetry.instrument('request_signoff')
 def handler(event, context):
     e = evidence._coerce(event)
     evidence.bind_tenant(e)   # core 1.6.0: interceptor-injected signed tenant (gateway tool)

@@ -1,6 +1,7 @@
 import os
 import time
 import boto3
+import telemetry
 import evidence
 
 # signoff_register — invoked by the sign-off state machine via the waitForTaskToken integration. Persists
@@ -10,6 +11,7 @@ import evidence
 PENDING_TABLE = os.environ.get("PENDING_TABLE", "governed-pending-approvals")
 
 
+@telemetry.instrument('signoff_register')
 def handler(event, context):
     region = os.environ.get("AWS_REGION", "us-east-1")
     e = evidence._coerce(event)
