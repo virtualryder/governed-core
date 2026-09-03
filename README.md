@@ -65,6 +65,11 @@ sibling," which was never true and cannot be, because the domain-shaped modules 
 - It is **not** an official AWS solution or an AWS-supported product.
 - The agents built on it are **assistants**. They do not award, adjudicate, deny, or auto-submit
   anything. Every consequential action terminates at a human sign-off gate.
+- It is **one of two implementations** of the Aegis Governance Pattern (AGP 1.0): this package is the
+  control plane the agent packs *run on* (AgentCore Gateway interceptor, tool decorators, evidence,
+  sign-off gate, tenancy, kill switch, budget meter); the platform repo's `platform_core` is the offline
+  reference implementation and conformance oracle. Who owns what, how each is pinned, and which versions
+  have run together: the platform's `docs/DEPENDENCY-MODEL.md` (aegis-ai-governance-platform-aws).
 
 ## Version history (what each release added, and which consumer proved it live)
 
