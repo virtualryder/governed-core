@@ -66,6 +66,21 @@ sibling," which was never true and cannot be, because the domain-shaped modules 
 - The agents built on it are **assistants**. They do not award, adjudicate, deny, or auto-submit
   anything. Every consequential action terminates at a human sign-off gate.
 
+## Version history (what each release added, and which consumer proved it live)
+
+| Version | Added | Live proof |
+|---|---|---|
+| 1.3.1 | package split out of the verticals; integrity lock | — |
+| 1.4.0 | GA-5 duplicate-submission protection promoted into `signoff_register` | benefits |
+| 1.5.0 | `finalize_signoff` verifies the APPROVAL PATH (SoD + consumed-by-`approve_signoff`), fail-closed | benefits (raw `send-task-success` refused live) |
+| 1.6.0 | **hybrid multi-tenant**: `tenancy` + `tenant_interceptor` promoted into the core; the canonical evidence writer, exactly-once `FINAL#` marker and pending-approvals register route to the acting tenant's own ledger / WORM vault / approvals table, fail-closed; the signed tenant pair rides the Step Functions execution input | benefits `evidence/AGENTCORE-MULTITENANT-AUDIT-2026-09-02.md` (2 tenants, 12/12) |
+| 1.7.0 | **correlation** (`telemetry.py`): tenant · session · trace · mcp-session · execution · request · case carried by the interceptor and the workflow, hashed into every WORM record, one structured `aegis.call` log line per tool invocation; `evidence.tenant_id` is the DERIVED tenant | — |
+| 1.7.1 | interceptor reads the MCP `params._meta` trace context (what the Strands MCP client actually propagates) | benefits `evidence/AGENTCORE-OBSERVABILITY-2026-09-02.md` (real AgentCore Runtime, 2 tenants, 13/13 each) |
+
+Consumers pin one of these by URL + sha256 (`requirements-core.txt`, `--require-hashes`); the wheel and
+`RELEASE-HASHES.txt` on each release are attached by CI (from 1.7.0; earlier releases were hand-uploaded).
+CI on this repo was red from 1.3.1 to 1.5.0 (tests ran without `PYTHONPATH=src`) — fixed in 1.6.0.
+
 ## Releasing
 
 ```bash
