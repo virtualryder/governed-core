@@ -34,6 +34,13 @@ def handler(event, context):
             "status": "PENDING", "created": int(time.time())}
     if e.get("content_hash"):
         item["content_hash"] = e["content_hash"]
+    # Bind the pending approval to the EXACT action (agent/tool/purpose/args) carried from request_signoff,
+    # so finalize can refuse a released token that is used to commit a DIFFERENT action than was approved.
+    if e.get("approval_binding"):
+        item["approval_binding"] = e["approval_binding"]
+        for _f in ("agent", "action", "purpose", "args_sha256"):
+            if e.get(_f):
+                item[_f] = e[_f]
     try:
         boto3.resource("dynamodb", region_name=region).Table(
             evidence.route_table(PENDING_TABLE, "pending-approvals")).put_item(

@@ -45,7 +45,7 @@ def _pending_table(region):
         evidence.route_table(PENDING_TABLE, "pending-approvals"))
 
 
-def _approval_path(case_id, approver, region):
+def _approval_path(case_id, approver, region, expected_binding=None):
     """Return (verified: bool, detail: str) for how this approval reached finalize."""
     try:
         tbl = _pending_table(region)
@@ -60,7 +60,18 @@ def _approval_path(case_id, approver, region):
         return False, "approval row status is %r (token released around approve_signoff?)" % status
     if recorded != approver:
         return False, "approver %r does not match the identity-verified approver %r" % (approver, recorded)
-    return True, "verified (approve_signoff: Cognito-token-verified, SoD-checked, single-use CONSUMED)"
+    # ACTION BINDING (2026-09-05): the approval was bound to a specific action (agent/tool/purpose/args)
+    # at request time. This finalize must be committing THAT action — otherwise a CONSUMED approval is
+    # being reused to commit something different. Recompute from what is being finalized and compare.
+    bound = row.get("approval_binding")
+    if bound:
+        if not expected_binding:
+            return False, "approval was bound to a specific action but this finalize carries no binding (fail-closed)"
+        if expected_binding != bound:
+            return False, ("approval-binding mismatch: this finalize commits a different action "
+                           "(agent/tool/purpose/args) than the one approved (fail-closed)")
+    return True, "verified (approve_signoff: Cognito-token-verified, SoD-checked, single-use CONSUMED%s)" % (
+        "; action-bound" if bound else "")
 
 
 def _exactly_once_marker(case_id, submission_id, approver, region):
@@ -96,7 +107,16 @@ def handler(event, context):
     if approver == requester:
         return _refuse(context, case_id, requester, approver,
                        "separation-of-duties: approver must differ from requester")
-    verified, path_detail = _approval_path(case_id, approver, region)
+    # Re-derive the approval binding from what is ACTUALLY being finalized (the execution input carries
+    # the agent/tool/purpose/args threaded from request_signoff); _approval_path refuses a mismatch.
+    expected_binding = evidence.approval_binding({
+        "case_id": case_id, "requester": requester,
+        "agent": event.get("agent") or "",
+        "action": event.get("action") or commit_action or "finalize",
+        "purpose": event.get("purpose") or "",
+        "args_sha256": event.get("args_sha256") or event.get("content_hash") or "",
+    })
+    verified, path_detail = _approval_path(case_id, approver, region, expected_binding)
     if not verified:
         if os.environ.get("SIGNOFF_ALLOW_UNVERIFIED", "").lower() == "true":
             path_detail = "UNVERIFIED-OVERRIDE (SIGNOFF_ALLOW_UNVERIFIED=true): " + path_detail
@@ -104,26 +124,40 @@ def handler(event, context):
             return _refuse(context, case_id, requester, approver,
                            "approval path not verified: " + path_detail)
 
-    # ---- core behavior (governed-core 1.4.0), with approval_path added to the evidence ----------
+    # ---- AUTHORITATIVE COMMIT (fail-closed ordering) --------------------------------------------
+    # The WORM + hash-chained COMMITTED evidence is written FIRST and is the source of truth. NO side
+    # effect precedes a durable audit record: the exactly-once FINAL# marker (and any downstream commit
+    # keyed off it) is set only AFTER the evidence is durable. If the audit cannot be written the
+    # finalize is REFUSED and NOTHING is marked finalized, so a retry re-commits cleanly. This fixes the
+    # audit-failure-before-side-effect fail-open (found 2026-09-04): the previous order set the FINAL#
+    # marker first, so an evidence-write failure left the case marked finalized with no audit and every
+    # retry returned idempotent:committed with no record. The second-approver double-finalize the marker
+    # used to guard is already refused by G2 above (the pending-approvals row records ONE approver and is
+    # single-use CONSUMED), so evidence-first loses no protection.
     submission_id = "SUB-" + hashlib.sha256(
         ("%s|%s" % (case_id, approver)).encode("utf-8")).hexdigest()[:12].upper()
-    first, submission_id = _exactly_once_marker(case_id, submission_id, approver, region)
-    if not first:
-        return {"committed": True, "idempotent": True, "submission_id": submission_id,
-                "case_id": case_id, "requester": requester, "approver": approver,
-                "note": "case already finalized; returning the original submission (exactly-once)"}
-
     res = evidence.record_event({
         "case_id": case_id, "action": commit_action, "phase": "COMMITTED", "actor": approver,
         "deidentified": True,
         "payload": {"requester": requester, "approver": approver, "submission_id": submission_id,
                     "approval_path": path_detail},
     }, context, source=os.environ.get("SOURCE", "finalize"))
-
     committed = bool(res.get("stored")) or "already recorded" in (res.get("reason") or "")
-    out = {"committed": committed, "submission_id": submission_id, "case_id": case_id,
+    if not committed:
+        # The audit could not be written -> REFUSE. Nothing was marked finalized; a retry re-commits.
+        return {"committed": False, "refused": True, "case_id": case_id, "requester": requester,
+                "approver": approver, "approval_path": path_detail,
+                "reason": "COMMITTED evidence could not be written; finalize refused (fail-closed)",
+                "error": res.get("error", "the COMMITTED evidence record could not be written"),
+                "evidence": {k: res.get(k) for k in ("audit_id", "chain_hash", "seq", "worm", "stored", "reason", "error")}}
+
+    # Durable evidence exists -> now the exactly-once marker (a replay / already-finalized case reads it
+    # and returns the original submission id; the evidence layer is itself append-only + idempotent).
+    first, submission_id = _exactly_once_marker(case_id, submission_id, approver, region)
+    out = {"committed": True, "submission_id": submission_id, "case_id": case_id,
            "requester": requester, "approver": approver, "approval_path": path_detail,
            "evidence": {k: res.get(k) for k in ("audit_id", "chain_hash", "seq", "worm", "stored", "reason", "error")}}
-    if not committed:
-        out["error"] = res.get("error", "the COMMITTED evidence record could not be written")
+    if not first:
+        out["idempotent"] = True
+        out["note"] = "case already finalized; COMMITTED evidence is append-only (exactly-once)"
     return out

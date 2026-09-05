@@ -56,6 +56,29 @@ def chain_hash(prev_hash, eh):
     return hashlib.sha256(((prev_hash or GENESIS) + ":" + eh).encode("utf-8")).hexdigest()
 
 
+# ---- approval binding (SoD approvals bound to the EXACT action, not just the case) -----------------
+# The single-use separation-of-duties approval must be bound to the specific action it approves — the
+# agent, the committing tool/action, its purpose, the requester and the arguments — so that releasing
+# the task token can commit ONLY that action. request_signoff computes this at INTENT; signoff_register
+# stores it on the pending-approvals row; finalize RE-DERIVES it from its own inputs and refuses on any
+# mismatch (fail-closed). Deterministic, canonical, and back-compatible: an empty field contributes an
+# empty string, so a deployment that does not yet thread every field still gets a stable binding over
+# what it does provide (case_id + requester at minimum), and finalize only enforces a binding that was
+# actually recorded.
+APPROVAL_BINDING_FIELDS = ("case_id", "requester", "agent", "action", "purpose", "args_sha256")
+
+
+def approval_binding(fields):
+    """SHA-256 over the canonical (case_id, requester, agent, action, purpose, args_sha256) tuple."""
+    body = {k: str((fields or {}).get(k) or "") for k in APPROVAL_BINDING_FIELDS}
+    return hashlib.sha256(_canonical(body).encode("utf-8")).hexdigest()
+
+
+def args_sha256(arguments):
+    """Canonical SHA-256 of a tool's argument object, for the approval binding (order-independent)."""
+    return hashlib.sha256(_canonical(arguments if arguments is not None else {}).encode("utf-8")).hexdigest()
+
+
 def _coerce(event):
     e = event or {}
     if isinstance(e, str):

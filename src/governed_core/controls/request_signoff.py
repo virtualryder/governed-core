@@ -45,10 +45,25 @@ def handler(event, context):
     if not requester:
         return {"requested": False, "error": "verified token carries no usable identity"}
 
+    # Bind the approval to the EXACT action being requested (agent, committing tool/action, purpose,
+    # requester, arguments) so a released task token can commit ONLY this action. args_sha256 falls back
+    # to a caller-supplied content_hash when the raw arguments are not passed to this tool.
+    _args_sha = e.get("args_sha256") or (evidence.args_sha256(e.get("args")) if e.get("args") is not None
+                                         else (e.get("content_hash") or ""))
+    binding_fields = {
+        "case_id": case_id, "requester": requester,
+        "agent": e.get("agent") or os.environ.get("AGENT_NAME", ""),
+        "action": e.get("commit_action") or e.get("action") or "finalize",
+        "purpose": e.get("purpose") or "",
+        "args_sha256": _args_sha,
+    }
+    binding = evidence.approval_binding(binding_fields)
+
     evidence.record_event({
         "case_id": case_id, "action": "request_signoff", "phase": "INTENT", "actor": requester,
         "deidentified": True, "payload": {"requester": requester,
-                                          "requester_identity": "cognito-access-token (RS256/JWKS verified)"},
+                                          "requester_identity": "cognito-access-token (RS256/JWKS verified)",
+                                          "approval_binding": binding, **binding_fields},
     }, context, source=os.environ.get("SOURCE", "request_signoff"))
 
     sm_arn = "arn:aws:states:%s:%s:stateMachine:%s" % (region, acct, SM_NAME)
@@ -58,6 +73,7 @@ def handler(event, context):
             # core 1.6.0: carry the acting tenant into the execution as the SIGNED pair (no interceptor
             # on the Step Functions hop); every downstream Lambda re-verifies it. {} in silo mode.
             input=json.dumps({"case_id": case_id, "icsr_id": case_id, "requester": requester,
+                              "approval_binding": binding, **binding_fields,
                               **_tenant_binding()}),
         )
         return {"requested": True, "phase": "PENDING_APPROVAL", "execution_arn": r["executionArn"],
