@@ -71,3 +71,60 @@ def test_separation_of_duties_refused_before_any_commit(monkeypatch):
     assert out["committed"] is False and out["refused"] is True
     assert calls["marker"] == 0                     # no commit side effect on an SoD refusal
     assert calls.get("last_phase") == "DENIED"      # the refusal itself is audited
+
+
+# --- 1.10.1: WORM-copy failure must NOT commit (deep-dive critical blocker #1) --------------------
+
+def _wire_worm(monkeypatch, rec_result):
+    """Wire finalize with a record_event that returns `rec_result` (to inject stored/worm/replay)."""
+    calls = {"marker": 0, "evidence": 0}
+    monkeypatch.setattr(finalize_signoff.evidence, "bind_tenant", lambda e: None)
+    monkeypatch.setattr(finalize_signoff, "_approval_path",
+                        lambda case_id, approver, region, expected_binding=None: (True, "verified (test)"))
+
+    def _rec(logical, context, source=None):
+        calls["evidence"] += 1
+        return dict(rec_result)
+    monkeypatch.setattr(finalize_signoff.evidence, "record_event", _rec)
+
+    def _marker(case_id, submission_id, approver, region):
+        calls["marker"] += 1
+        return (True, submission_id)
+    monkeypatch.setattr(finalize_signoff, "_exactly_once_marker", _marker)
+    return calls
+
+
+def test_worm_failure_refuses_commit_even_when_ledger_stored(monkeypatch):
+    """stored=True, worm=False (the S3 Object-Lock copy failed) MUST NOT commit. This is the exact
+    fault the reviewer reproduced: the old predicate accepted `stored` alone and wrote the FINAL#
+    marker with worm=False. Now: refused, and the marker side effect is never executed."""
+    calls = _wire_worm(monkeypatch, {"stored": True, "worm": False, "worm_error": "AccessDenied", "audit_id": "A1"})
+    out = finalize_signoff.handler(_event(), _Ctx())
+    assert out["committed"] is False and out["refused"] is True
+    assert calls["marker"] == 0                          # NO side effect without ledger + WORM
+    assert out["evidence"]["worm"] is False
+
+
+def test_retry_with_repaired_worm_commits(monkeypatch):
+    """A retry after a transient WORM failure: record_event returns replay=True, worm=True (the WORM
+    copy was repaired from the authoritative stored item). is_durable is satisfied -> commit."""
+    calls = _wire_worm(monkeypatch, {"stored": False, "replay": True, "worm": True,
+                                     "reason": "append-only: this exact record is already recorded (immutable)", "audit_id": "A1"})
+    out = finalize_signoff.handler(_event(), _Ctx())
+    assert out["committed"] is True and calls["marker"] == 1
+
+
+def test_replay_without_worm_still_refuses(monkeypatch):
+    """replay=True but worm=False (WORM still unavailable on retry) -> not durable -> still refused."""
+    calls = _wire_worm(monkeypatch, {"stored": False, "replay": True, "worm": False, "audit_id": "A1"})
+    out = finalize_signoff.handler(_event(), _Ctx())
+    assert out["committed"] is False and out["refused"] is True and calls["marker"] == 0
+
+
+def test_worm_not_required_override_commits_when_explicit(monkeypatch):
+    """EVIDENCE_WORM_REQUIRED=false is the explicit, deployment-level relaxation (e.g. a WORM-less
+    sandbox). Then stored alone is durable enough. Secure default is strict; this must be opt-in."""
+    monkeypatch.setenv("EVIDENCE_WORM_REQUIRED", "false")
+    calls = _wire_worm(monkeypatch, {"stored": True, "worm": False, "audit_id": "A1"})
+    out = finalize_signoff.handler(_event(), _Ctx())
+    assert out["committed"] is True and calls["marker"] == 1

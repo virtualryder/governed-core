@@ -59,12 +59,19 @@ def handler(event, context):
     }
     binding = evidence.approval_binding(binding_fields)
 
-    evidence.record_event({
+    # 1.10.1: the INTENT is the FIRST durable authorization record. NO side effect (the Step Functions
+    # execution) may precede it. Capture the result and REFUSE if the evidence is not durable (ledger +
+    # WORM) — the prior code ignored this return and started the execution even on stored=False.
+    intent = evidence.record_event({
         "case_id": case_id, "action": "request_signoff", "phase": "INTENT", "actor": requester,
         "deidentified": True, "payload": {"requester": requester,
                                           "requester_identity": "cognito-access-token (RS256/JWKS verified)",
                                           "approval_binding": binding, **binding_fields},
     }, context, source=os.environ.get("SOURCE", "request_signoff"))
+    if not evidence.is_durable(intent):
+        return {"requested": False, "phase": "REFUSED", "case_id": case_id, "requester": requester,
+                "error": "INTENT evidence not durable (ledger + WORM required); sign-off NOT started (fail-closed)",
+                "evidence": {k: intent.get(k) for k in ("stored", "replay", "worm", "reason", "error")}}
 
     sm_arn = "arn:aws:states:%s:%s:stateMachine:%s" % (region, acct, SM_NAME)
     try:

@@ -24,6 +24,58 @@ import tenancy
 _TOOLS_CALL = "tools/call"
 _CONTAINED = ("tools/call", "tools/list")       # what the kill switch short-circuits (initialize passes)
 
+# 1.10.1 (deep-dive #3): Cedar CONTEXT fields the CALLER MUST NEVER control. A caller-supplied value of
+# any of these is STRIPPED (like the tenant), and the interceptor injects the values it can vouch for
+# from AUTHORITATIVE sources — server clock (within_service_window) and the live meter (budget_ok). The
+# rest (consent, purpose) are left UNSET unless a pack ships an `authoritative_context` resolver, so Cedar
+# DENIES (fail-closed) rather than trusting a caller-asserted boolean. This closes the "the nine-condition
+# model trusts caller assertions" hole at the enforcement point.
+_RESERVED_CTX = tuple(f.strip() for f in os.environ.get(
+    "RESERVED_CONTEXT_FIELDS", "consent,purpose,budget_ok,within_service_window").split(",") if f.strip())
+
+
+def _within_service_window():
+    """Server-authoritative temporal check from SERVICE_WINDOW_* config (UTC). Returns True/False, or
+    None when unconfigured (the field is then simply not asserted). Fail-closed on a misconfiguration."""
+    import time as _t
+    start = os.environ.get("SERVICE_WINDOW_START")
+    end = os.environ.get("SERVICE_WINDOW_END")
+    days = os.environ.get("SERVICE_WINDOW_DAYS")
+    if start is None and end is None and not days:
+        return None
+    tm = _t.gmtime()
+    if days:
+        allowed = {int(d) for d in days.split(",") if d.strip().isdigit()}
+        if tm.tm_wday not in allowed:
+            return False
+    try:
+        s = int(start) if start is not None else 0
+        e = int(end) if end is not None else 24
+    except (TypeError, ValueError):
+        return False
+    return s <= tm.tm_hour < e
+
+
+def _authoritative_ctx(args, tenant):
+    """The server-derived Cedar context fields to inject after the caller's copies are stripped. Only
+    values the interceptor can vouch for. A pack may ship an `authoritative_context` module exposing
+    resolve(args, tenant) -> dict (e.g. consent from a consent store, purpose bound to the case/workflow);
+    absent that, consent/purpose stay UNSET (fail-closed)."""
+    ctx = {"budget_ok": True}                    # reached here only past the hard-breach gateway deny
+    w = _within_service_window()
+    if w is not None:
+        ctx["within_service_window"] = w
+    try:
+        import authoritative_context
+        extra = authoritative_context.resolve(dict(args or {}), tenant) or {}
+        for k, v in extra.items():
+            ctx[k] = v
+    except ImportError:
+        pass
+    except Exception as exc:                     # a resolver error must never grant — log and leave unset
+        print(json.dumps({"aegis": "authz_ctx", "component": "interceptor", "error": type(exc).__name__}))
+    return ctx
+
 
 def _bearer(headers):
     for k, v in (headers or {}).items():
@@ -130,6 +182,13 @@ def build_output(event, secret, multitenant, context=None):
     if tenant:                                     # silo identities carry no tenant: no injection
         args[tenancy.TENANT_FIELD] = tenant
         args[tenancy.TENANT_SIG_FIELD] = tenancy.sign_tenant(tenant, secret)
+    # 1.10.1 (deep-dive #3): the caller may NOT assert the Cedar authorization-context fields. Strip any
+    # caller/model-supplied copy, then inject ONLY server-authoritative values (server clock, live meter,
+    # optional pack resolver). consent/purpose without an authoritative resolver stay UNSET -> Cedar denies.
+    for _f in _RESERVED_CTX:
+        args.pop(_f, None)
+    for _k, _v in _authoritative_ctx(args, tenant).items():
+        args[_k] = _v
     # phase 110: correlation keys from the headers ADOT/AgentCore put on the runtime's outbound call
     # (traceparent / X-Amzn-Trace-Id, baggage session.id, mcp-session-id). Observability only —
     # the tenant above stays the sole signed, trusted field.

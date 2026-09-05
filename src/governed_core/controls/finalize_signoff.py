@@ -142,12 +142,18 @@ def handler(event, context):
         "payload": {"requester": requester, "approver": approver, "submission_id": submission_id,
                     "approval_path": path_detail},
     }, context, source=os.environ.get("SOURCE", "finalize"))
-    committed = bool(res.get("stored")) or "already recorded" in (res.get("reason") or "")
+    # 1.10.1: DURABLE means the hash-chained ledger write AND the S3 Object-Lock WORM copy both landed
+    # (evidence.is_durable). The prior predicate accepted `stored` alone, so a WORM-copy failure
+    # (stored=True, worm=False) still wrote the FINAL# marker and returned committed=True — the exact
+    # fail-open a consequential commit must never have. A retry re-runs record_event, which now REPAIRS
+    # the WORM copy on replay, so a transient S3 failure heals on the next attempt instead of committing
+    # without immutable evidence.
+    committed = evidence.is_durable(res)
     if not committed:
-        # The audit could not be written -> REFUSE. Nothing was marked finalized; a retry re-commits.
+        # The audit is not durable -> REFUSE. Nothing was marked finalized; a retry re-commits/repairs.
         return {"committed": False, "refused": True, "case_id": case_id, "requester": requester,
                 "approver": approver, "approval_path": path_detail,
-                "reason": "COMMITTED evidence could not be written; finalize refused (fail-closed)",
+                "reason": "COMMITTED evidence not durable (ledger + WORM required); finalize refused (fail-closed)",
                 "error": res.get("error", "the COMMITTED evidence record could not be written"),
                 "evidence": {k: res.get(k) for k in ("audit_id", "chain_hash", "seq", "worm", "stored", "reason", "error")}}
 

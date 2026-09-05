@@ -61,24 +61,60 @@ def handler(event, context):
         return _deny(context, src, case_id, approver,
                      "separation-of-duties: approver must differ from requester (%s)" % requester)
 
+    # 1.10.1 UN-STRANDABLE, EVIDENCE-BEFORE-SIDE-EFFECT SAGA. The prior order CONSUMED the approval,
+    # released the task token (the side effect), THEN wrote APPROVED evidence and IGNORED its result — so
+    # evidence could fail after the case had already moved on, and a consume-then-send-failure stranded
+    # the case permanently. New order:
+    #   (1) RESERVE the approval idempotently — a retry by the SAME approver that has not yet released is
+    #       allowed back in (so a transient failure downstream can be reconciled, not stranded);
+    #   (2) write APPROVED evidence and REQUIRE it durable (ledger + WORM) — NO token release otherwise;
+    #   (3) release the task token, idempotently (an already-released/timed-out token counts as released);
+    #   (4) mark released.
+    # A failure at (2) or (3) leaves the row CONSUMED/released=false, so a retry re-enters, re-writes the
+    # (idempotent, WORM-repairing) evidence and releases — never stranded, never released without evidence.
     try:
         tbl.update_item(
             Key={"case_id": case_id},
             UpdateExpression="SET #s = :c, approver = :a",
-            ConditionExpression="#s = :p",
+            ConditionExpression="#s = :p OR (#s = :c AND approver = :a AND (attribute_not_exists(released) OR released = :f))",
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":c": "CONSUMED", ":p": "PENDING", ":a": approver},
+            ExpressionAttributeValues={":c": "CONSUMED", ":p": "PENDING", ":a": approver, ":f": False},
         )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            # CONSUMED by a DIFFERENT approver, or already released -> single-use
             return {"approved": False, "case_id": case_id, "reason": "approval already consumed (single-use)"}
         raise
 
-    sfn.send_task_success(taskToken=token, output=json.dumps({"approved": True, "approver": approver}))
-    evidence.record_event({
+    # (2) durable APPROVED evidence BEFORE any side effect
+    res = evidence.record_event({
         "case_id": case_id, "action": "approve", "phase": "APPROVED", "actor": approver,
         "deidentified": True, "payload": {"requester": requester, "approver": approver,
                                           "approver_identity": "cognito-access-token (RS256/JWKS verified)"},
     }, context, source=src)
+    if not evidence.is_durable(res):
+        return {"approved": False, "case_id": case_id, "approver": approver, "requester": requester,
+                "reason": "APPROVED evidence not durable (ledger + WORM required); task token NOT released (fail-closed); retry to reconcile",
+                "evidence": {k: res.get(k) for k in ("stored", "replay", "worm", "reason", "error")}}
+
+    # (3) release the task token, idempotently
+    release_note = "released"
+    try:
+        sfn.send_task_success(taskToken=token, output=json.dumps({"approved": True, "approver": approver}))
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("TaskDoesNotExist", "TaskTimedOut"):
+            release_note = "already released/timed out (idempotent)"
+        else:
+            return {"approved": False, "case_id": case_id, "approver": approver, "requester": requester,
+                    "reason": "task-token release failed (%s); APPROVED evidence is durable; retry to reconcile" % code}
+
+    # (4) mark released (best effort; a failure here only causes a benign idempotent re-release on retry)
+    try:
+        tbl.update_item(Key={"case_id": case_id}, UpdateExpression="SET released = :t",
+                        ExpressionAttributeValues={":t": True})
+    except ClientError:
+        pass
+
     return {"approved": True, "approver": approver, "requester": requester, "case_id": case_id,
-            "approver_identity": "verified"}
+            "approver_identity": "verified", "release": release_note}

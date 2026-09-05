@@ -222,6 +222,50 @@ def bind_tenant(event):
     return tenancy.bind_tenant_from_args(event if isinstance(event, dict) else _coerce(event))
 
 
+def _ensure_worm(ddb_res, s3, table, bucket, case_id, audit_id):
+    """Idempotent WORM repair (1.10.1). If the S3 Object-Lock copy of this event is MISSING, write it
+    from the AUTHORITATIVE stored ledger item (never a rebuilt record, whose seq/chain would differ on
+    a replay). Returns (worm: bool, err: str|None). This is what lets a retry after a prior WORM-put
+    failure still reach durable (stored && worm), which finalize/request/approve now REQUIRE."""
+    from botocore.exceptions import ClientError, BotoCoreError
+    key = "%s/%s.json" % (case_id, audit_id)
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True, None                       # already durable
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code not in ("404", "NoSuchKey", "NotFound", "NoSuchBucket"):
+            return False, "head_object: " + (code or "ClientError")
+        if code == "NoSuchBucket":
+            return False, "NoSuchBucket"
+    except BotoCoreError as exc:
+        return False, type(exc).__name__
+    try:
+        item = ddb_res.Table(table).get_item(Key={"audit_id": audit_id}).get("Item")
+        if not item:
+            return False, "stored event not found for WORM repair"
+        s3.put_object(Bucket=bucket, Key=key, Body=_canonical(item).encode("utf-8"),
+                      ContentType="application/json")
+        return True, None
+    except (ClientError, BotoCoreError) as exc:
+        return False, type(exc).__name__
+
+
+def is_durable(res):
+    """1.10.1 DURABILITY PREDICATE — the single definition of "the evidence is durable enough that a
+    consequential side effect may proceed". Requires BOTH: (a) the hash-chained ledger write landed —
+    a fresh `stored`, an idempotent `replay`, or the append-only "already recorded" proof — AND (b) the
+    S3 Object-Lock WORM copy exists (`worm`). This closes the fail-open where a commit proceeded on
+    `stored` alone while the WORM copy had failed (`worm=False`). A deployment may set
+    EVIDENCE_WORM_REQUIRED=false to relax the WORM leg (explicit, and the caller stamps it) — the ledger
+    write is ALWAYS required. Callers (finalize/request/approve) must gate every side effect on this."""
+    res = res or {}
+    ledger = bool(res.get("stored")) or bool(res.get("replay")) or ("already recorded" in (res.get("reason") or ""))
+    worm_required = _env("EVIDENCE_WORM_REQUIRED", "true").lower() != "false"
+    worm_ok = bool(res.get("worm")) or not worm_required
+    return bool(ledger and worm_ok)
+
+
 def record_event(event, context, source=None):
     e = _coerce(event)
     region = _env("AWS_REGION", "us-east-1")
@@ -258,10 +302,19 @@ def record_event(event, context, source=None):
             code = exc.response.get("Error", {}).get("Code", "")
             reasons = exc.response.get("CancellationReasons") or []
             rc = [r.get("Code") for r in reasons]
-            # event already exists -> exact replay -> idempotent append-only proof
+            # event already exists -> exact replay -> idempotent append-only proof. 1.10.1: also ENSURE
+            # the WORM copy exists (idempotent repair from the authoritative stored item) and REPORT it,
+            # so a retry after a prior WORM-put failure can still reach durable (stored/replay && worm),
+            # which finalize/request/approve now REQUIRE before any side effect.
             if "ConditionalCheckFailed" in (rc[0] if rc else ""):
-                return {"stored": False, "audit_id": rec["audit_id"], "chain_hash": rec["chain_hash"],
-                        "reason": "append-only: this exact record is already recorded (immutable)"}
+                worm, worm_err = _ensure_worm(ddb_res, s3, table, bucket, logical["case_id"], rec["audit_id"])
+                out = {"stored": False, "replay": True, "worm": worm, "audit_id": rec["audit_id"],
+                       "chain_hash": rec["chain_hash"], "case_id": logical["case_id"],
+                       "reason": "append-only: this exact record is already recorded (immutable)",
+                       "table": table, "bucket": bucket}
+                if worm_err:
+                    out["worm_error"] = worm_err
+                return out
             # head CAS lost to a concurrent writer -> re-read and retry
             if code in ("TransactionCanceledException", "ConditionalCheckFailedException") and attempt < _MAX_RETRIES - 1:
                 time.sleep(0.05 * (attempt + 1))
