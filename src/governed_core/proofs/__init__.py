@@ -26,6 +26,7 @@ from governed_core.proofs.logs import (  # noqa: F401
     insights_query,
     parse_json_message,
     read_lambda_calls,
+    window_ms,
     scan_log_events,
 )
 from governed_core.proofs.cloudtrail import (  # noqa: F401
@@ -35,5 +36,6 @@ from governed_core.proofs.cloudtrail import (  # noqa: F401
 
 __all__ = [
     "insights_query", "parse_json_message", "read_lambda_calls", "scan_log_events",
+    "window_ms",
     "read_cloudtrail_capture", "verify_cloudtrail_capture",
 ]

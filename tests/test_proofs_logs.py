@@ -49,10 +49,15 @@ class FakeLogs:
         raise AssertionError("the audit reader must not use Insights")
 
 
+# L39: a real window. These fixtures used (0, 1), which is 1970 and is now refused on purpose -
+# an impossible window must raise rather than quietly return "no audit lines".
+WINDOW = (1788818472000, 1788818935000)
+
+
 def _read(msgs, keys=None, **kw):
     logs = FakeLogs(msgs, **kw)
     return L.read_lambda_calls(logs, ["/aws/lambda/pack-write-audit"], CASE,
-                               keys if keys is not None else {}, 0, 1), logs
+                               keys if keys is not None else {}, *WINDOW), logs
 
 
 def test_correlates_when_every_join_key_is_present():
@@ -106,4 +111,4 @@ def test_a_non_retryable_error_propagates():
             raise Boom("access denied")
 
     with pytest.raises(Boom):
-        L.read_lambda_calls(Bad([]), ["/g"], CASE, {}, 0, 1)
+        L.read_lambda_calls(Bad([]), ["/g"], CASE, {}, *WINDOW)

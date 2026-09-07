@@ -44,15 +44,46 @@ def _call_with_retry(fn, **kw):
             time.sleep(1.5 * (2 ** attempt))
 
 
+# ---- L39: filter_log_events takes MILLISECONDS; start_query takes SECONDS -----------------------
+# These two CloudWatch APIs disagree on units, and this module offers both. read_lambda_calls was
+# converted from the query engine to a plain scan (L33) without converting the callers' seconds, so
+# a 2026 timestamp became 1970-01-21 and the scan asked for a window 56 years wide of nothing -
+# silently, on every run. It survived because the callers disagree and only one is wrong: the
+# lineage proof computes milliseconds and was correct, the transparency proof computes seconds and
+# reported "no audit lines" for both tenants.
+#
+# The unit is normalized here, once, and an impossible window RAISES. The raise matters more than
+# the conversion: an unlabelled unit that silently answers "no evidence" is the L25/L29/L31/L33/L33b
+# family, and the answer to that family is always to fail loudly rather than report an absence.
+_YEAR_2020_MS = 1577836800000
+_SECONDS_CEILING = 100000000000        # anything smaller was seconds, not milliseconds
+
+
+def window_ms(start, end):
+    """Normalize a (start, end) log window to epoch milliseconds. Accepts seconds or milliseconds."""
+    def _ms(t):
+        t = int(t)
+        return t * 1000 if t < _SECONDS_CEILING else t
+    a, b = _ms(start), _ms(end)
+    if a >= b:
+        raise ValueError("empty log window: start=%r end=%r (normalized %d..%d)" % (start, end, a, b))
+    if a < _YEAR_2020_MS:
+        raise ValueError(
+            "log window starts before 2020 (normalized %d ms). That is a caller unit bug, not an "
+            "empty result - refusing to report an absence of evidence from an impossible window." % a)
+    return a, b
+
+
 def scan_log_events(logs, group, start, end, keep=None):
     """Every event in [start, end] for one log group, paginated, as a plain scan.
 
     `keep(message) -> bool` filters in Python. A missing log group is not an error - a pack may not
     deploy every function - but any other failure propagates.
     """
+    start_ms, end_ms = window_ms(start, end)        # L39
     out, token = [], None
     while True:
-        kw = {"logGroupName": group, "startTime": int(start), "endTime": int(end), "limit": 1000}
+        kw = {"logGroupName": group, "startTime": start_ms, "endTime": end_ms, "limit": 1000}
         if token:
             kw["nextToken"] = token
         try:
