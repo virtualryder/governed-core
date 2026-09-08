@@ -5,10 +5,10 @@
 # 'identical core' while the trees differed is how the exactly-once finalization gap hid for weeks.
 # The 'version' below means: derived from governed-core <version>. CROSS-repo parity is a separate
 # question answered by tools/check_core_parity.py. CI runs both and fails on either.
-version: 1.11.0
+version: 1.11.1
 files: 53
-tree_sha256: 67bf1efe5e26f3687f15139d637e088093870c16e573d74f4268b6682320389c
-74ee4d121463989183f9a9b848577eb2434f3f5d095de2a4b197bf29ffa2399b  governed_core/CORE_VERSION
+tree_sha256: 8dcaf689f74ac38cbdcb9ea6f5fbddd926138318c2d4de3dadf62f333766b3cf
+4f9416d650bd28343244b868dfebdb11e70d7b32423536cb87b8c31fde62f993  governed_core/CORE_VERSION
 4d1a081c2a1382ed1f2f43a3d1163c6c56a432f7966a78f6f1887d80dee0755d  governed_core/__init__.py
 435c5db12aad1ab6d68afaef23e454d872a815496f3bbc08b3b4d16c6c22bacf  governed_core/connector/__init__.py
 2490c78e8067798930870fcb6be5b99fb6316602f0e6958662970c6823cd4c2d  governed_core/connector/deploy_connector.sh
@@ -44,9 +44,9 @@ b7adbfcec4941a95a1ff24d3bf7482e8eeb5576fb3ec6d87a540bf506c3e6125  governed_core/
 ac017d6ae2c7a5dedbf4b0be07fd85e99602d61c15d162fd734a972f1a1e94e6  governed_core/engine/redteam.sh
 6799495afaeb6ece1b30efc36f49c0e7e1e598ec748e8934ecb703f90b7fe6ba  governed_core/engine/render.py
 c87a7546f89428427278b2ebf4889e5d5550e667ea718a2576312985dc1ed6f2  governed_core/engine/signoff.asl.json.tmpl
-4dd7b281a6faa3248a86cda9bffd48532624b4e080c63284f588d3f4cc818690  governed_core/proofs/__init__.py
+6523f8ddfb32a3cfa00f1cfaee4fcab7e8c51ff4d2bcfbc36753daa807edcff4  governed_core/proofs/__init__.py
 6041f94fc26016c2072c7358abf4e8db35d0e9c8fd37a43f4b12124f0e351e8b  governed_core/proofs/cloudtrail.py
-af8e1ddadb34faed2511c3275bddc2e69c38e41f3994777c709814321952245c  governed_core/proofs/logs.py
+7efc0824f47b29dc8a164a33cf99149671503954ea33456664154601f60c8208  governed_core/proofs/logs.py
 0ed22f137f937e93cdc79da897a179c17e6571bc13395c1ec6ea4524c8d764d4  governed_core/regen_core_lock.py
 858ac69f0b9e1568391d17f4698cb68047c222be5ecaea24e686456027e78ce6  governed_core/runtime/.dockerignore
 fecb2b2420eb2e419a4e292c333ed3b469abba7699b1bdbaefc701545fef1718  governed_core/runtime/Dockerfile

@@ -1,0 +1,23 @@
+# Ruff configuration.
+#
+# target-version is the whole point of this file. Without it Ruff falls back to an old default and
+# F821 flags `ExceptionGroup` as an undefined name - it is a Python 3.11 BUILTIN, used deliberately
+# in tests/test_runtime_input_contract.py because Strands re-raises hook exceptions from inside an
+# anyio task group as one. CI installs Python 3.12 and Ruff had no way to know that, so the lint
+# step failed on correct code. Reproduced 2026-09-08: default target -> "Found 1 error";
+# target-version = "py312" -> "All checks passed!".
+#
+# Keep this in step with the python-version in .github/workflows/ci.yml.
+target-version = "py312"
+
+# Vendored and generated trees are not ours to lint: a runtime virtualenv under lib/runtime/.venv
+# contains third-party packages, and cdk.out is synthesized output.
+extend-exclude = [
+    ".venv",
+    ".work",
+    "cdk.out",
+    "cdk/cdk.out",
+    "cdk/.build",
+    "**/site-packages/**",
+    "**/__pycache__/**",
+]
