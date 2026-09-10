@@ -28,7 +28,7 @@ This package is the fix: one artifact, one version, consumed by pinned hash inst
 Pin the released wheel by URL and hash. Nothing here is on PyPI.
 
 ```
-governed-core @ https://github.com/virtualryder/governed-core/releases/download/v1.10.1/governed_core-1.10.1-py3-none-any.whl \
+governed-core @ https://github.com/virtualryder/governed-core/releases/download/v1.11.1/governed_core-1.11.1-py3-none-any.whl \
   --hash=sha256:<see RELEASE-HASHES.txt on the release>
 ```
 
@@ -85,12 +85,17 @@ sibling," which was never true and cannot be, because the domain-shaped modules 
 | 1.9.0 | **per-tenant budget** (`budget.py`): reserve-before / commit-after on every model call (atomic conditional ADD, cannot oversell), USD estimate from a pinned price table (version recorded on every commit), per-tenant cap overrides by PutItem, gateway interceptor refuses a tenant at/over cap (403 + DENIED WORM record), metrics for 60/85/100 % alarms; hard = fail-closed, soft = flag | benefits `evidence/AGENTCORE-BUDGET-2026-09-03.md` (real Runtime, 2 tenants, 24/24: meter == model-invocation log to the token; cap refusals at gateway / drafter / runtime incl. mid-session; 60/85 % alarms; AWS Budgets USD-ceiling breach → kill switch) |
 | 1.10.0 | **correctness batch**: audit fail-closed — `finalize_signoff` writes the COMMITTED WORM / hash-chained evidence BEFORE the exactly-once `FINAL#` marker (#159); approvals bound to case / requester / agent / action / purpose / `args_sha256` and re-verified at consume (#162); deepened PII/PHI (`pii_detect`: UTF-8 byte-window chunking past the Comprehend sync limit + Luhn-checked regex backstop) (#164) | benefits `evidence/GOVERNED-CORE-1.10.0-LIVE-GATE-2026-09-05.md` (from-zero two-tenant: isolation 12/12 incl. approval binding, masking live on Comprehend, #168 lineage 0 orphans) |
 | 1.10.1 | **fault semantics** (third external review): a consequential commit REQUIRES the WORM copy (`evidence.is_durable` = ledger AND WORM; a missing WORM copy is repaired on replay, never committed around); `request_signoff` / `approve_signoff` fail closed on non-durable evidence via un-strandable idempotent sagas; the gateway interceptor STRIPS caller-supplied consent / purpose / budget_ok / service-window and injects only server-authoritative values (+18 fault-injection tests) | benefits `evidence/AGENTCORE-PERIMETER-AUTHZ-3-2026-09-05.md` (`ben-perim`, authoritative consent/purpose reaches Cedar; forged consent DENIED) and `evidence/TIER1-REGATE-2026-09-06.md` (`ben-t1`, from-zero private mode + CMK + perimeter, 12/12). PV / EDU / Housing pin 1.10.1 **offline-gated** — their last live gates ran on 1.9.0 (PV, EDU) / 1.1.0 (Housing) |
+| 1.11.0 | **one shared proof library** (`governed_core.proofs`, PAR-4): the four packs each carried a fork of the same live-proof helpers, so a fix to one never reached the other three. Promoted into the package so a proof is written once and consumed by pin. | benefits (the pack's proofs run against the packaged library) |
+| 1.11.1 | **L39**: `filter_log_events` takes **milliseconds** and the proofs had been passing seconds, so a log-window query silently matched nothing and the proof that depended on it could not fail. Carries the version bump 1.11.0 should have had. | benefits `evidence/FULL-PORTFOLIO-GATE-benefits_runtime_agent.json` (`ben-fpf`, from-zero, 21/21, incl. the CONN-1 governed system-of-record connector proven end to end on this version) |
 
 Consumers pin one of these by URL + sha256 (`requirements-core.txt`, `--require-hashes`); the wheel and
 `RELEASE-HASHES.txt` on each release are attached by CI (from 1.7.0; earlier releases were hand-uploaded).
 CI on this repo was red from 1.3.1 to 1.5.0 (tests ran without `PYTHONPATH=src`) — fixed in 1.6.0.
 
 ## Releasing
+
+The suite was **106 tests** at the time of this measurement (2026-09-10); this repo has no
+count gate, so treat that number as a reading, not a guarantee.
 
 ```bash
 python -m pytest tests -q
